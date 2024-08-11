@@ -5,25 +5,49 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
+import android.os.ParcelUuid
 import android.util.Log
+import com.ble.chatting.server.ble.Const
 
 class BleAdvertise {
     private var advertiser: BluetoothLeAdvertiser? = null
     private var advertiseCallback: AdvertiseCallback? = null
     private var advertiseSettings: AdvertiseSettings? = null
     private var adapter: BluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+    private var advertiseData: AdvertiseData = buildAdvertiseData()
 
     fun startAdvertisement() {
         advertiser = adapter.bluetoothLeAdvertiser
 
         if (advertiseCallback == null) {
-            advertiseCallback = DeviceAdver
+            advertiseCallback = DeviceAdvertiseCallback()
+
+            try {
+                advertiser?.startAdvertising(advertiseSettings, advertiseData, advertiseCallback)
+            } catch (e: SecurityException) {
+
+            }
+        }
+    }
+
+    fun stopAdvertising() {
+        Log.d("asdf", "Stop Advertising with advertiser $advertiser")
+        if (advertiseCallback != null) {
+            try {
+                advertiser?.stopAdvertising(advertiseCallback)
+            } catch (e: SecurityException) {
+
+            }
         }
     }
 
     private fun buildAdvertiseData(): AdvertiseData {
         val dataBuilder = AdvertiseData.Builder()
-            .addServiceUuid(p)
+            .addServiceUuid(ParcelUuid(Const.SERVICE_UUID))
+            .setIncludeDeviceName(true)
+            .setIncludeTxPowerLevel(true)
+
+        return dataBuilder.build()
     }
 
     private fun buildAdvertiseSettings(): AdvertiseSettings {
