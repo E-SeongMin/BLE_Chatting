@@ -2,7 +2,12 @@ package com.ble.chatting.server
 
 import android.Manifest
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattServer
+import android.bluetooth.BluetoothGattServerCallback
+import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -33,6 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
+import java.util.zip.CRC32
 
 class MainActivity : AppCompatActivity() {
 
@@ -61,8 +67,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         init()
-        initListener()
         initBleLibrary()
+        initListener()
         setUpGattServer()
     }
 
@@ -88,7 +94,7 @@ class MainActivity : AppCompatActivity() {
             etxtSendText.setOnKeyListener { _, keyCode, event ->
                 if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_ENTER) {
                     if (selectedBleDevice == null) {
-                        Toast.makeText(this, "선택된 디바이스가 없습니다.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "선택된 디바이스가 없습니다.", Toast.LENGTH_SHORT).show()
                     } else {
                         selectedBleDevice?.let {
                             try {
@@ -136,7 +142,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setUpGattServer() {
-        
+        try {
+            bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+            mGattSend = bluetoothManager.openGattServer(this, mGattServerCallback).apply {
+                clearServices()
+                addService(setUpGattService())
+            }
+        } catch (e: SecurityException) {
+
+        }
+    }
+
+    private fun setUpGattService(): BluetoothGattService {
+        var service = BluetoothGattService(Const.SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+
+        val messageCharacteristic = BluetoothGattCharacteristic(Const.MESSAGE_UUID, BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE or
+                BluetoothGattCharacteristic.PROPERTY_NOTIFY, BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE)
+
+        service.addCharacteristic(messageCharacteristic)
+
+        return service
     }
 
     private fun stopGattServer() {
@@ -147,7 +172,105 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun getMessage(device: BluetoothDevice, message: Message) {
+    private val mGattServerCallback = object : BluetoothGattServerCallback() {
+        override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int, characteristic: BluetoothGattCharacteristic, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
+            super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value)
+            if (characteristic.uuid == Const.MESSAGE_UUID)  {
+                Log.d("asdf", "mGattServerCallback onCharacteristicWriteRequest")
+                try {
+                    mGattSend?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+
+                    var byte0x00 = 0x00
+                    var byte0x01 = 0x01
+                    var byte0x02 = 0x02
+                    var byte0x03 = 0x03
+                    var byte0x04 = 0x04
+                    var message = ""
+
+                    Log.d("asdf", "Hex to Byte : ${toHexString(value)}")
+
+                    if (value[0] == byte0x03.toByte()) {
+                        if (value[1] == byte0x01.toByte()) {
+                            messageArray.add(value)
+                        } else if (value[1] == byte0x02.toByte()) {
+                            messageArray.add(value)
+                            for (i in 0 until messageArray.size) {
+                                message += messageArray[i].toString(Charsets.UTF_8)
+                            }
+                            getMessage(device, message)
+                            messageArray.clear()
+                        }
+                    } else if (value[0] == byte0x04.toByte()) {
+                        if (value[1] == byte0x01.toByte()) {
+                            Log.d("asdf", "1 value.size : ${value.size}")
+                            receiveByteArray.write(value, 2, value.size - 2)
+                        } else if (value[1] == byte0x02.toByte()) {
+                            Log.d("asdf", "2 value.size : ${value.size}")
+                            receiveByteArray.write(value, 2, 6)
+
+                            val crcCheck = CRC32()
+                            crcCheck.update(receiveByteArray.toByteArray())
+                            Log.d("asdf", "CRC32 : ${crcCheck.value}, size: ${receiveByteArray.size()}")
+
+                            Log.d("asdf", "Hex to Byte : ${toHexString(receiveByteArray.toByteArray())}")
+                            getImage(receiveByteArray.toByteArray())
+                        }
+                    }
+
+                } catch (e: SecurityException) {
+
+                }
+            }
+        }
+
+        override fun onDescriptorWriteRequest(device: BluetoothDevice?, requestId: Int, descriptor: BluetoothGattDescriptor?, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray?) {
+            super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value)
+            Log.d("asdf", "mGattServerCallback onDescriptorWriteRequest")
+        }
+
+        override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
+            super.onConnectionStateChange(device, status, newState)
+            Log.d("asdf", "mGattServerCallback onConnectionStateChange : ${device}, newState: ${newState}")
+            device?.let {
+                when (newState) {
+                    0 -> {
+                        for (i in 0 until connectedBleDeviceList.size) {
+                            if (connectedBleDeviceList[i] == it) {
+                                CoroutineScope(Dispatchers.Main).launch {
+                                    connectedBleDeviceList.removeAt(i)
+                                    listAdapter.notifyItemRemoved(i)
+                                }
+                                break
+                            }
+                        }
+                    }
+                    2 -> {
+                        CoroutineScope(Dispatchers.Main).launch {
+                            connectedBleDeviceList.add(it)
+                            listAdapter.notifyItemInserted(connectedBleDeviceList.size - 1)
+                        }
+                    }
+                    else -> {
+
+                    }
+                }
+            }
+
+            if (connectedBleDeviceList.size == 0 || connectedBleDeviceList.size == index) {
+                index = -1
+            }
+        }
+    }
+
+    private fun toHexString(byteArray: ByteArray): String {
+        val sbx = StringBuilder()
+        for (i in byteArray.indices) {
+            sbx.append(String.format("%02X", byteArray[i]))
+        }
+        return sbx.toString()
+    }
+
+    private fun getMessage(device: BluetoothDevice, message: String) {
         try {
             CoroutineScope(Dispatchers.Main).launch {
                 binding.tvChattingText.text = "[${device}] 에서 보낸 메세지\n\n${message}"

@@ -12,7 +12,7 @@ import com.ble.chatting.server.ble.Const
 class BleAdvertise {
     private var advertiser: BluetoothLeAdvertiser? = null
     private var advertiseCallback: AdvertiseCallback? = null
-    private var advertiseSettings: AdvertiseSettings? = null
+    private var advertiseSettings: AdvertiseSettings? = buildAdvertiseSettings()
     private var adapter: BluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
     private var advertiseData: AdvertiseData = buildAdvertiseData()
 
