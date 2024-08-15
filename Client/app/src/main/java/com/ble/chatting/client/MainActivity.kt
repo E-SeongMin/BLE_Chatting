@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -17,18 +18,34 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.RecyclerView
 import com.ble.chatting.client.ble.BleLibrary
+import com.ble.chatting.client.ble.scan.BleScanData
+import com.ble.chatting.client.ble.scan.BleScanStatusListener
 import com.ble.chatting.client.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
-    var mApplication = MyApplication.application()
     private lateinit var binding: ActivityMainBinding
 
     var syncObj = Any()
     var scanResults: ArrayList<BluetoothDevice> = ArrayList()
-    var listAdapter = RecyclerView
+    var listAdapter = RecyclerViewAdapter(this)
+
+    private val bleScanStatusListener = object : BleScanStatusListener {
+        override fun onScanResult(bleScanData: BleScanData) {
+            addScanReult(bleScanData)
+        }
+
+        override fun onStartStatus() {
+
+        }
+
+        override fun onStopStatus() {
+
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +56,95 @@ class MainActivity : AppCompatActivity() {
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
+        }
+
+        init()
+        initBleLibrary()
+        initListener()
+    }
+
+    private fun init() {
+        binding.apply {
+            recyclerView.adapter = listAdapter
+            recyclerView.visibility = View.GONE
+            progressBar.visibility = View.GONE
+            tvScanning.visibility = View.GONE
+
+            val defaultAnimator = DefaultItemAnimator()
+            defaultAnimator.addDuration = 1000
+
+            recyclerView.itemAnimator = defaultAnimator
+        }
+    }
+
+    private fun refreshAdapter() {
+        scanResults.clear()
+        binding.recyclerView.visibility = View.GONE
+        listAdapter.notifyDataSetChanged()
+    }
+
+    private fun initBleLibrary() {
+        if (isBluetoothPossible() && checkConnectPermission() && checkScanPermission()) {
+            BleLibrary.initialize(MyApplication.application())
+        } else {
+            getRequestPermission()
+        }
+    }
+
+    private fun initListener() {
+        binding.apply {
+            btnStartScan.setOnClickListener {
+                Log.d("asdf", "click btnStartScan")
+                refreshAdapter()
+                progressBar.visibility = View.VISIBLE
+                tvScanning.visibility = View.VISIBLE
+                BleLibrary.startScan(bleScanStatusListener)
+            }
+
+            btnStopScan.setOnClickListener {
+                Log.d("asdf", "click btnStopScan")
+                progressBar.visibility = View.GONE
+                tvScanning.visibility = View.GONE
+                BleLibrary.stopScan(bleScanStatusListener)
+                refreshAdapter()
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        refreshAdapter()
+    }
+
+    private fun addScanReult(bleScanData: BleScanData) {
+        synchronized(syncObj) {
+            try {
+                val device: BluetoothDevice = bleScanData.result.device
+                val deviceAddress: String = device?.address ?: "not address"
+
+                for (dev in scanResults) {
+                    if (dev.address == deviceAddress) {
+                        return
+                    }
+                }
+
+                if (device.name == null) {
+                    return
+                }
+
+                scanResults.add(device)
+
+                if (scanResults.size > 0 && binding.recyclerView.visibility == View.GONE) {
+                    binding.recyclerView.visibility = View.VISIBLE
+                }
+
+                listAdapter.notifyItemInserted(scanResults.size - 1)
+
+                Log.d("asdf", "AddMainScanResult name : ${device.name}")
+                Log.d("asdf", "MainScanResults size : ${scanResults.size}")
+            } catch (e: SecurityException) {
+
+            }
         }
     }
 
